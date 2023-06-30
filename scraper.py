@@ -102,7 +102,7 @@ def get_car(car_url: str, auto_id: int) -> Car | None:
     return car
 
 
-async def process_car(car):
+def process_car(car):
     cursor.execute("SELECT * FROM cars WHERE autoId = ?", (car.autoId,))
     existing_car = cursor.fetchone()
 
@@ -116,7 +116,7 @@ async def process_car(car):
         )
         conn.commit()
 
-        await send_new_car_notification(car)
+        send_new_car_notification(car)
 
     # Price changed, update database and send notification
     elif existing_car[3] != car.prise_USD:
@@ -126,10 +126,10 @@ async def process_car(car):
         )
         conn.commit()
 
-        await change_price_notification(car)
+        change_price_notification(car)
 
 
-async def scrap_pages():
+def scrap_pages():
     page = requests.get(filter_url)
     soup = BeautifulSoup(page.content, "html.parser")
 
@@ -144,22 +144,22 @@ async def scrap_pages():
             continue
         print(car)
 
-        await process_car(car)
+        process_car(car)
 
         sleep_duration = random.uniform(2, 5)
-        await time.sleep(sleep_duration)
+        time.sleep(sleep_duration)
     conn.close()
 
-async def run_scraper():
+def run_scraper():
     while True:
         print("Running scraper...")
-        await scrap_pages()
+        scrap_pages()
         print("Scraper finished.")
-        await time.sleep(600)
+        time.sleep(600)
 
 
 if __name__ == '__main__':
-    asyncio.run(run_scraper())
+    run_scraper()
 
 
 
