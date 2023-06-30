@@ -1,3 +1,4 @@
+import asyncio
 import sqlite3
 import requests
 import cloudscraper
@@ -7,6 +8,7 @@ import random
 from bs4 import BeautifulSoup
 from dataclasses import dataclass
 
+from notification import send_new_car_notification, change_price_notification
 
 filter_url = "https://auto.ria.com/uk/search/?indexName=auto,order_auto,newauto_search&categories.main.id=1&brand.id[0]=79&model.id[0]=2104&country.import.usa.not=0&price.currency=1&abroad.not=0&custom.not=1&damage.not=0&page=0&size=100"
 
@@ -69,10 +71,10 @@ def get_car(car_url: str, auto_id: int) -> Car | None:
         else:
             car.prise_USD = None
 
-    # Skip car with the same auto_id and prise exists in the database
+    # Skip car with the same auto_id and prise if exists in the database
     cursor.execute("SELECT * FROM cars WHERE autoId = ?", (auto_id,))
     existing_car = cursor.fetchone()
-    if existing_car is not None and existing_car[3] == car.prise_USD:
+    if existing_car and existing_car[3] == car.prise_USD:
         return None
 
     # Extract photo
@@ -86,24 +88,48 @@ def get_car(car_url: str, auto_id: int) -> Car | None:
 
         car.photo_urls.append(photo_url)
 
-    # Extract auction_url (variant 1)
-    # auction_link = soup.select_one("a[href^='https://auto.ria.com/bidfax']")
-    # car.auction_url = auction_link["href"]
-
-    # Extract auction_url (variant 2)
+    # Extract auction_url
     auction_script = soup.select_one("script[data-bidfax-pathname]")
     script_contents = auction_script.attrs
     part_url = script_contents.get("data-bidfax-pathname")[7:]
     if part_url:
         car.auction_url = "https://bidfax.info" + part_url
 
-    # Extract the image URLs
-    car.usa_photo_urls = get_usa_photo(car.auction_url)
+    # Extract bidfax image URLs
+    if car.auction_url:
+        car.usa_photo_urls = get_usa_photo(car.auction_url)
 
     return car
 
 
-def scrap_pages():
+async def process_car(car):
+    cursor.execute("SELECT * FROM cars WHERE autoId = ?", (car.autoId,))
+    existing_car = cursor.fetchone()
+
+    # Car doesn't exist in DB, make an entry and send notification
+    if existing_car is None:
+        cursor.execute(
+            '''INSERT INTO cars (autoId, brand, price, photo_urls, car_url, auction_url, usa_photo_urls)
+                VALUES (?, ?, ?, ?, ?, ?, ?)''',
+            (car.autoId, car.brand, car.prise_USD, ','.join(car.photo_urls), car.car_url, car.auction_url,
+             ','.join(car.usa_photo_urls))
+        )
+        conn.commit()
+
+        await send_new_car_notification(car)
+
+    # Price changed, update database and send notification
+    elif existing_car[3] != car.prise_USD:
+        cursor.execute(
+            '''UPDATE cars SET price = ? WHERE autoId = ?''',
+            (car.prise_USD, car.autoId)
+        )
+        conn.commit()
+
+        await change_price_notification(car)
+
+
+async def scrap_pages():
     page = requests.get(filter_url)
     soup = BeautifulSoup(page.content, "html.parser")
 
@@ -116,31 +142,24 @@ def scrap_pages():
         car = get_car(car_url, auto_id)
         if car is None:
             continue
-
         print(car)
 
-        cursor.execute(
-            '''INSERT INTO cars (autoId, brand, price, photo_urls, car_url, auction_url, usa_photo_urls)
-                VALUES (?, ?, ?, ?, ?, ?, ?)''',
-               (car.autoId, car.brand, car.prise_USD, ','.join(car.photo_urls), car.car_url, car.auction_url,
-               ','.join(car.usa_photo_urls))
-        )
-        conn.commit()
+        await process_car(car)
 
         sleep_duration = random.uniform(2, 5)
-        time.sleep(sleep_duration)
-
+        await time.sleep(sleep_duration)
     conn.close()
 
-def run_scraper():
+async def run_scraper():
     while True:
         print("Running scraper...")
-        scrap_pages()
+        await scrap_pages()
         print("Scraper finished.")
-        time.sleep(600)
+        await time.sleep(600)
+
 
 if __name__ == '__main__':
-    run_scraper()
+    asyncio.run(run_scraper())
 
 
 
