@@ -7,8 +7,16 @@ import random
 
 from bs4 import BeautifulSoup
 from dataclasses import dataclass
+from scrapingant_client import ScrapingAntClient
 
 from notification import send_new_car_notification, change_price_notification
+
+TOKEN = "92de881a497c43798d5d6994d3e66c0c"
+client = ScrapingAntClient(token=TOKEN)
+# Scrape the example.com site
+result = client.general_request('https://bidfax.info/toyota/sequoia/7903082-toyota-sequoia-sr5-2019-white-57l-8-vin-5tdzy5g13ks073195.html')
+
+
 
 filter_url = "https://auto.ria.com/uk/search/?indexName=auto,order_auto,newauto_search&categories.main.id=1&brand.id[0]=79&model.id[0]=2104&country.import.usa.not=0&price.currency=1&abroad.not=0&custom.not=1&damage.not=0&page=0&size=100"
 
@@ -38,13 +46,12 @@ class Car:
 
 
 def get_usa_photo(auction_url: str) -> list[str]:
-    scraper = cloudscraper.create_scraper()
-    response = scraper.get(auction_url)
+    response = client.general_request(auction_url)
     content = response.content
     soup = BeautifulSoup(content, "html.parser")
 
-    photo_elements = soup.select('div.full-screens img')
-    usa_photo_urls = ["https://bidfax.info" + photo['src'] for photo in photo_elements]
+    photo_elements3 = soup.select('div.full-screens img')
+    usa_photo_urls = ["https://bidfax.info" + photo['src'] for photo in photo_elements3]
 
     return usa_photo_urls
 
@@ -78,8 +85,8 @@ def get_car(car_url: str, auto_id: int) -> Car | None:
         return None
 
     # Extract photo
-    photo_elements = soup.find_all("div", class_="photo-620x465")
-    for element in photo_elements[:5]:
+    image_elements = soup.find_all("div", class_="photo-620x465")
+    for element in image_elements[:5]:
         img_element = element.find("img")
         photo_url = img_element["src"]
 
@@ -96,7 +103,7 @@ def get_car(car_url: str, auto_id: int) -> Car | None:
         car.auction_url = "https://bidfax.info" + part_url
 
     # Extract bidfax image URLs
-    if car.auction_url:
+    if car.auction_url and car.usa_photo_urls == []:
         car.usa_photo_urls = get_usa_photo(car.auction_url)
 
     return car
