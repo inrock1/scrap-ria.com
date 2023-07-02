@@ -47,3 +47,7 @@ The scraper will send notifications to the configured Telegram channel for uniqu
 - Link to the page with car photos from the US auction
 - Photos car in USA  
 If a price change or a sold listing is detected for a previously notified car, the scraper will also send a message to the Telegram channel.
+
+![Screenshot_1](Screenshot_notification.jpg)
+
+![Screenshot_2](Screenshot_notification2.jpg)
