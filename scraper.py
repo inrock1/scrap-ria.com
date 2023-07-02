@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import requests
 import time
@@ -6,14 +7,16 @@ import random
 from bs4 import BeautifulSoup
 from dataclasses import dataclass
 from scrapingant_client import ScrapingAntClient
+from dotenv import load_dotenv
 
 from notification import send_new_car_notification, change_price_notification
 
-TOKEN = "92de881a497c43798d5d6994d3e66c0c"
-client = ScrapingAntClient(token=TOKEN)
 
+load_dotenv()
+ANT_TOKEN = os.getenv("ANT_TOKEN")
 
-filter_url = "https://auto.ria.com/uk/search/?indexName=auto,order_auto,newauto_search&categories.main.id=1&brand.id[0]=79&model.id[0]=2104&country.import.usa.not=0&price.currency=1&abroad.not=0&custom.not=1&damage.not=0&page=0&size=100"
+FILTER_URL = "https://auto.ria.com/uk/search/?indexName=auto,order_auto,newauto_search&categories.main.id=1&brand.id[0]=79&model.id[0]=2104&country.import.usa.not=0&price.currency=1&abroad.not=0&custom.not=1&damage.not=0&page=0&size=100"
+HEADERS = {"User-Agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.97 Safari/537.36"}
 
 conn = sqlite3.connect('car_data.db')
 cursor = conn.cursor()
@@ -43,6 +46,7 @@ class Car:
 
 
 def get_usa_photo(auction_url: str) -> list[str]:
+    client = ScrapingAntClient(token=ANT_TOKEN)
     response = client.general_request(auction_url)
     content = response.content
     soup = BeautifulSoup(content, "html.parser")
@@ -54,7 +58,7 @@ def get_usa_photo(auction_url: str) -> list[str]:
 
 
 def get_car(car_url: str, auto_id: int) -> Car | None:
-    page = requests.get(car_url)
+    page = requests.get(car_url, headers=HEADERS)
     soup = BeautifulSoup(page.content, "html.parser")
     car = Car(autoId=auto_id, brand="Toyota Sequoia", car_url=car_url,
         main_price="", prise_USD=None, photo_urls=[], auction_url=None, usa_photo_urls=[])
@@ -133,11 +137,11 @@ def process_car(car):
         )
         conn.commit()
 
-        # change_price_notification(car)
+        change_price_notification(car)
 
 
 def scrap_pages():
-    page = requests.get(filter_url)
+    page = requests.get(FILTER_URL, headers=HEADERS)
     soup = BeautifulSoup(page.content, "html.parser")
 
     car_elements = soup.find_all("section", class_="ticket-item")
@@ -158,13 +162,14 @@ def scrap_pages():
 
 
 def run_scraper():
-    while True:
-        print("Running scraper...")
-        scrap_pages()
-        print("Scraper finished. Waiting 10 minutes...")
-        time.sleep(600)
-
-    conn.close()
+    try:
+        while True:
+            print("Running scraper...")
+            scrap_pages()
+            print("Scraper finished. Waiting 10 minutes...")
+            time.sleep(600)
+    finally:
+        conn.close()
 
 
 if __name__ == '__main__':

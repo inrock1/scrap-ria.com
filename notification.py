@@ -1,12 +1,13 @@
-import asyncio
+import os
+
 import telebot
-import logging
+from dotenv import load_dotenv
 
 
-BOT_TOKEN = "6031099887:AAFZpmF7y1ltGh0b9dFHXUxQfj3cVfFQIYE"
+load_dotenv()
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = "-1001904784576"
 bot = telebot.TeleBot(token=BOT_TOKEN)
-logging.basicConfig(level=logging.INFO)
 
 def send_new_car_notification(car):
     media_group = [telebot.types.InputMediaPhoto(media=photo_url) for photo_url in car.photo_urls]
