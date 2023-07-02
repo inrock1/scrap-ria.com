@@ -27,8 +27,9 @@ pip install -r requirements.txt
 
 Join to telegram chanel: https://t.me/+mpkb-7PZs1UzMzZi
 
+Ask the autor for .env file and put it in project folder.  
+Or rename .env.sample to .env and put tokens.
 
-Ask the autor for .env file and put it in project folder.
 ## Usage
 To run the car scraper, execute the following command in the project directory:
 
