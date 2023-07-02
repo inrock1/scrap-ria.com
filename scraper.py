@@ -1,7 +1,5 @@
-import asyncio
 import sqlite3
 import requests
-import cloudscraper
 import time
 import random
 
@@ -13,9 +11,6 @@ from notification import send_new_car_notification, change_price_notification
 
 TOKEN = "92de881a497c43798d5d6994d3e66c0c"
 client = ScrapingAntClient(token=TOKEN)
-# Scrape the example.com site
-result = client.general_request('https://bidfax.info/toyota/sequoia/7903082-toyota-sequoia-sr5-2019-white-57l-8-vin-5tdzy5g13ks073195.html')
-
 
 
 filter_url = "https://auto.ria.com/uk/search/?indexName=auto,order_auto,newauto_search&categories.main.id=1&brand.id[0]=79&model.id[0]=2104&country.import.usa.not=0&price.currency=1&abroad.not=0&custom.not=1&damage.not=0&page=0&size=100"
@@ -31,13 +26,15 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS cars (
                     photo_urls TEXT,
                     car_url TEXT,
                     auction_url TEXT,
-                    usa_photo_urls TEXT
+                    usa_photo_urls TEXT,
+                    main_price TEXT
                 )''')
 
 @dataclass
 class Car:
     autoId: int
     brand: str
+    main_price: str
     prise_USD: int
     photo_urls: list[str]
     car_url: str
@@ -59,11 +56,13 @@ def get_usa_photo(auction_url: str) -> list[str]:
 def get_car(car_url: str, auto_id: int) -> Car | None:
     page = requests.get(car_url)
     soup = BeautifulSoup(page.content, "html.parser")
-    car = Car(autoId=auto_id, brand="Toyota Sequoia", car_url=car_url, prise_USD=None, photo_urls=[], auction_url=None, usa_photo_urls=[])
+    car = Car(autoId=auto_id, brand="Toyota Sequoia", car_url=car_url,
+        main_price="", prise_USD=None, photo_urls=[], auction_url=None, usa_photo_urls=[])
 
     # Extract price
     price_element = soup.find("div", class_="price_value")
     price_text = price_element.strong.text.strip()
+    car.main_price = price_text
 
     if "$" in price_text:
         price_numeric = ''.join(filter(str.isdigit, price_text))
@@ -78,10 +77,12 @@ def get_car(car_url: str, auto_id: int) -> Car | None:
         else:
             car.prise_USD = None
 
-    # Skip car with the same auto_id and prise if exists in the database
+
     cursor.execute("SELECT * FROM cars WHERE autoId = ?", (auto_id,))
     existing_car = cursor.fetchone()
-    if existing_car and existing_car[3] == car.prise_USD:
+
+    # Skip car with the same auto_id and prise if exists in the database
+    if existing_car and existing_car[8] == car.main_price:
         return None
 
     # Extract photo
@@ -92,7 +93,6 @@ def get_car(car_url: str, auto_id: int) -> Car | None:
 
         if "youtube.com" in photo_url:
             continue
-
         car.photo_urls.append(photo_url)
 
     # Extract auction_url
@@ -103,7 +103,7 @@ def get_car(car_url: str, auto_id: int) -> Car | None:
         car.auction_url = "https://bidfax.info" + part_url
 
     # Extract bidfax image URLs
-    if car.auction_url and car.usa_photo_urls == []:
+    if (car.auction_url and existing_car == None) or (car.auction_url and existing_car[7] == []):
         car.usa_photo_urls = get_usa_photo(car.auction_url)
 
     return car
@@ -116,9 +116,9 @@ def process_car(car):
     # Car doesn't exist in DB, make an entry and send notification
     if existing_car is None:
         cursor.execute(
-            '''INSERT INTO cars (autoId, brand, price, photo_urls, car_url, auction_url, usa_photo_urls)
-                VALUES (?, ?, ?, ?, ?, ?, ?)''',
-            (car.autoId, car.brand, car.prise_USD, ','.join(car.photo_urls), car.car_url, car.auction_url,
+            '''INSERT INTO cars (autoId, brand, main_price, price, photo_urls, car_url, auction_url, usa_photo_urls)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+            (car.autoId, car.brand, car.main_price, car.prise_USD, ','.join(car.photo_urls), car.car_url, car.auction_url,
              ','.join(car.usa_photo_urls))
         )
         conn.commit()
@@ -126,14 +126,14 @@ def process_car(car):
         send_new_car_notification(car)
 
     # Price changed, update database and send notification
-    elif existing_car[3] != car.prise_USD:
+    elif existing_car[8] != car.main_price:
         cursor.execute(
-            '''UPDATE cars SET price = ? WHERE autoId = ?''',
-            (car.prise_USD, car.autoId)
+            '''UPDATE cars SET main_price = ?, price = ? WHERE autoId = ?''',
+            (car.main_price, car.prise_USD, car.autoId)
         )
         conn.commit()
 
-        change_price_notification(car)
+        # change_price_notification(car)
 
 
 def scrap_pages():
@@ -144,25 +144,27 @@ def scrap_pages():
     for car_element in car_elements:
         auto_id = car_element["data-advertisement-id"]
         car_url = f"https://auto.ria.com/uk/auto_toyota_sequoia_{auto_id}.html"
-        print(car_url)
+        print("checking: ", car_url)
 
         car = get_car(car_url, auto_id)
         if car is None:
             continue
-        print(car)
+        print("detected new car or change prise: ", car)
 
         process_car(car)
 
         sleep_duration = random.uniform(2, 5)
         time.sleep(sleep_duration)
-    conn.close()
+
 
 def run_scraper():
     while True:
         print("Running scraper...")
         scrap_pages()
-        print("Scraper finished.")
+        print("Scraper finished. Waiting 10 minutes...")
         time.sleep(600)
+
+    conn.close()
 
 
 if __name__ == '__main__':
