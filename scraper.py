@@ -1,27 +1,29 @@
 import os
-import sqlite3
-import requests
-import time
 import random
-
-from bs4 import BeautifulSoup
+import sqlite3
+import time
 from dataclasses import dataclass
-from scrapingant_client import ScrapingAntClient
+
+import requests
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+from scrapingant_client import ScrapingAntClient
 
-from notification import send_new_car_notification, change_price_notification
-
+from notification import change_price_notification, send_new_car_notification
 
 load_dotenv()
 ANT_TOKEN = os.getenv("ANT_TOKEN")
 
 FILTER_URL = "https://auto.ria.com/uk/search/?indexName=auto,order_auto,newauto_search&categories.main.id=1&brand.id[0]=79&model.id[0]=2104&country.import.usa.not=0&price.currency=1&abroad.not=0&custom.not=1&damage.not=0&page=0&size=100"
-HEADERS = {"User-Agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.97 Safari/537.36"}
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.97 Safari/537.36"
+}
 
-conn = sqlite3.connect('car_data.db')
+conn = sqlite3.connect("car_data.db")
 cursor = conn.cursor()
 
-cursor.execute('''CREATE TABLE IF NOT EXISTS cars (
+cursor.execute(
+    """CREATE TABLE IF NOT EXISTS cars (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     autoId INTEGER UNIQUE,
                     brand TEXT,
@@ -31,7 +33,9 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS cars (
                     auction_url TEXT,
                     usa_photo_urls TEXT,
                     main_price TEXT
-                )''')
+                )"""
+)
+
 
 @dataclass
 class Car:
@@ -51,8 +55,8 @@ def get_usa_photo(auction_url: str) -> list[str]:
     content = response.content
     soup = BeautifulSoup(content, "html.parser")
 
-    photo_elements3 = soup.select('div.full-screens img')
-    usa_photo_urls = ["https://bidfax.info" + photo['src'] for photo in photo_elements3]
+    photo_elements3 = soup.select("div.full-screens img")
+    usa_photo_urls = ["https://bidfax.info" + photo["src"] for photo in photo_elements3]
 
     return usa_photo_urls
 
@@ -60,8 +64,16 @@ def get_usa_photo(auction_url: str) -> list[str]:
 def get_car(car_url: str, auto_id: int) -> Car | None:
     page = requests.get(car_url, headers=HEADERS)
     soup = BeautifulSoup(page.content, "html.parser")
-    car = Car(autoId=auto_id, brand="Toyota Sequoia", car_url=car_url,
-        main_price="", prise_USD=None, photo_urls=[], auction_url=None, usa_photo_urls=[])
+    car = Car(
+        autoId=auto_id,
+        brand="Toyota Sequoia",
+        car_url=car_url,
+        main_price="",
+        prise_USD=None,
+        photo_urls=[],
+        auction_url=None,
+        usa_photo_urls=[],
+    )
 
     # Extract price
     price_element = soup.find("div", class_="price_value")
@@ -69,18 +81,18 @@ def get_car(car_url: str, auto_id: int) -> Car | None:
     car.main_price = price_text
 
     if "$" in price_text:
-        price_numeric = ''.join(filter(str.isdigit, price_text))
+        price_numeric = "".join(filter(str.isdigit, price_text))
         car.prise_USD = int(price_numeric)
     else:
-        alternative_price_element = soup.find("span", class_="price_value--additional").find("span",
-                                                                                             {"data-currency": "USD"})
+        alternative_price_element = soup.find(
+            "span", class_="price_value--additional"
+        ).find("span", {"data-currency": "USD"})
         if alternative_price_element is not None:
             alternative_price_text = alternative_price_element.text.strip()
-            price_numeric = ''.join(filter(str.isdigit, alternative_price_text))
+            price_numeric = "".join(filter(str.isdigit, alternative_price_text))
             car.prise_USD = int(price_numeric)
         else:
             car.prise_USD = None
-
 
     cursor.execute("SELECT * FROM cars WHERE autoId = ?", (auto_id,))
     existing_car = cursor.fetchone()
@@ -107,7 +119,9 @@ def get_car(car_url: str, auto_id: int) -> Car | None:
         car.auction_url = "https://bidfax.info" + part_url
 
     # Extract bidfax image URLs
-    if (car.auction_url and existing_car == None) or (car.auction_url and existing_car[7] == []):
+    if (car.auction_url and existing_car is None) or (
+        car.auction_url and existing_car[7] == []
+    ):
         car.usa_photo_urls = get_usa_photo(car.auction_url)
 
     return car
@@ -120,10 +134,18 @@ def process_car(car):
     # Car doesn't exist in DB, make an entry and send notification
     if existing_car is None:
         cursor.execute(
-            '''INSERT INTO cars (autoId, brand, main_price, price, photo_urls, car_url, auction_url, usa_photo_urls)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-            (car.autoId, car.brand, car.main_price, car.prise_USD, ','.join(car.photo_urls), car.car_url, car.auction_url,
-             ','.join(car.usa_photo_urls))
+            """INSERT INTO cars (autoId, brand, main_price, price, photo_urls, car_url, auction_url, usa_photo_urls)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                car.autoId,
+                car.brand,
+                car.main_price,
+                car.prise_USD,
+                ",".join(car.photo_urls),
+                car.car_url,
+                car.auction_url,
+                ",".join(car.usa_photo_urls),
+            ),
         )
         conn.commit()
 
@@ -132,8 +154,8 @@ def process_car(car):
     # Price changed, update database and send notification
     elif existing_car[8] != car.main_price:
         cursor.execute(
-            '''UPDATE cars SET main_price = ?, price = ? WHERE autoId = ?''',
-            (car.main_price, car.prise_USD, car.autoId)
+            """UPDATE cars SET main_price = ?, price = ? WHERE autoId = ?""",
+            (car.main_price, car.prise_USD, car.autoId),
         )
         conn.commit()
 
@@ -172,8 +194,5 @@ def run_scraper():
         conn.close()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_scraper()
-
-
-
