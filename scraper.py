@@ -50,81 +50,94 @@ class Car:
 
 
 def get_usa_photo(auction_url: str) -> list[str]:
-    client = ScrapingAntClient(token=ANT_TOKEN)
-    response = client.general_request(auction_url)
-    content = response.content
-    soup = BeautifulSoup(content, "html.parser")
+    try:
+        client = ScrapingAntClient(token=ANT_TOKEN)
+        response = client.general_request(auction_url)
+        content = response.content
+        soup = BeautifulSoup(content, "html.parser")
 
-    photo_elements3 = soup.select("div.full-screens img")
-    usa_photo_urls = ["https://bidfax.info" + photo["src"] for photo in photo_elements3]
+        photo_elements3 = soup.select("div.full-screens img")
+        usa_photo_urls = ["https://bidfax.info" + photo["src"] for photo in photo_elements3]
 
-    return usa_photo_urls
+        return usa_photo_urls
+    except requests.RequestException as e:
+        print("Error during request:", e)
+    except Exception as e:
+        print("An error occurred:", e)
+    return []
 
 
 def get_car(car_url: str, auto_id: int) -> Car | None:
-    page = requests.get(car_url, headers=HEADERS)
-    soup = BeautifulSoup(page.content, "html.parser")
-    car = Car(
-        autoId=auto_id,
-        brand="Toyota Sequoia",
-        car_url=car_url,
-        main_price="",
-        prise_USD=None,
-        photo_urls=[],
-        auction_url=None,
-        usa_photo_urls=[],
-    )
+    try:
+        page = requests.get(car_url, headers=HEADERS)
+        page.raise_for_status()
+        soup = BeautifulSoup(page.content, "html.parser")
+        car = Car(
+            autoId=auto_id,
+            brand="Toyota Sequoia",
+            car_url=car_url,
+            main_price="",
+            prise_USD=None,
+            photo_urls=[],
+            auction_url=None,
+            usa_photo_urls=[],
+        )
 
-    # Extract price
-    price_element = soup.find("div", class_="price_value")
-    price_text = price_element.strong.text.strip()
-    car.main_price = price_text
+        # Extract price
+        price_element = soup.find("div", class_="price_value")
+        price_text = price_element.strong.text.strip()
+        car.main_price = price_text
 
-    if "$" in price_text:
-        price_numeric = "".join(filter(str.isdigit, price_text))
-        car.prise_USD = int(price_numeric)
-    else:
-        alternative_price_element = soup.find(
-            "span", class_="price_value--additional"
-        ).find("span", {"data-currency": "USD"})
-        if alternative_price_element is not None:
-            alternative_price_text = alternative_price_element.text.strip()
-            price_numeric = "".join(filter(str.isdigit, alternative_price_text))
+        if "$" in price_text:
+            price_numeric = "".join(filter(str.isdigit, price_text))
             car.prise_USD = int(price_numeric)
         else:
-            car.prise_USD = None
+            alternative_price_element = soup.find(
+                "span", class_="price_value--additional"
+            ).find("span", {"data-currency": "USD"})
+            if alternative_price_element is not None:
+                alternative_price_text = alternative_price_element.text.strip()
+                price_numeric = "".join(filter(str.isdigit, alternative_price_text))
+                car.prise_USD = int(price_numeric)
+            else:
+                car.prise_USD = None
 
-    cursor.execute("SELECT * FROM cars WHERE autoId = ?", (auto_id,))
-    existing_car = cursor.fetchone()
+        cursor.execute("SELECT * FROM cars WHERE autoId = ?", (auto_id,))
+        existing_car = cursor.fetchone()
 
-    # Skip car with the same auto_id and prise if exists in the database
-    if existing_car and existing_car[8] == car.main_price:
-        return None
+        # Skip car with the same auto_id and prise if exists in the database
+        if existing_car and existing_car[8] == car.main_price:
+            return None
 
-    # Extract photo
-    image_elements = soup.find_all("div", class_="photo-620x465")
-    for element in image_elements[:5]:
-        img_element = element.find("img")
-        photo_url = img_element["src"]
+        # Extract photo
+        image_elements = soup.find_all("div", class_="photo-620x465")
+        for element in image_elements[:5]:
+            img_element = element.find("img")
+            photo_url = img_element["src"]
 
-        if "youtube.com" in photo_url:
-            continue
-        car.photo_urls.append(photo_url)
+            if "youtube.com" in photo_url:
+                continue
+            car.photo_urls.append(photo_url)
 
-    # Extract auction_url
-    auction_script = soup.select_one("script[data-bidfax-pathname]")
-    script_contents = auction_script.attrs
-    part_url = script_contents.get("data-bidfax-pathname")[7:]
-    if part_url:
-        car.auction_url = "https://bidfax.info" + part_url
+        # Extract auction_url
+        auction_script = soup.select_one("script[data-bidfax-pathname]")
+        script_contents = auction_script.attrs
+        part_url = script_contents.get("data-bidfax-pathname")[7:]
+        if part_url:
+            car.auction_url = "https://bidfax.info" + part_url
 
-    # Extract bidfax image URLs
-    if (car.auction_url and existing_car is None) or (
-        car.auction_url and existing_car[7] == []
-    ):
-        car.usa_photo_urls = get_usa_photo(car.auction_url)
+        # Extract bidfax image URLs
+        if (car.auction_url and existing_car is None) or (
+            car.auction_url and existing_car[7] == []
+        ):
+            car.usa_photo_urls = get_usa_photo(car.auction_url)
 
-    return car
+        return car
+    except requests.RequestException as e:
+        print("Error during page request:", e)
+    except Exception as e:
+        print("An error occurred:", e)
+    return None
 
 
 def process_car(car):
@@ -163,24 +176,30 @@ def process_car(car):
 
 
 def scrap_pages():
-    page = requests.get(FILTER_URL, headers=HEADERS)
-    soup = BeautifulSoup(page.content, "html.parser")
+    try:
+        page = requests.get(FILTER_URL, headers=HEADERS)
+        page.raise_for_status()
+        soup = BeautifulSoup(page.content, "html.parser")
 
-    car_elements = soup.find_all("section", class_="ticket-item")
-    for car_element in car_elements:
-        auto_id = car_element["data-advertisement-id"]
-        car_url = f"https://auto.ria.com/uk/auto_toyota_sequoia_{auto_id}.html"
-        print("checking: ", car_url)
+        car_elements = soup.find_all("section", class_="ticket-item")
+        for car_element in car_elements:
+            auto_id = car_element["data-advertisement-id"]
+            car_url = f"https://auto.ria.com/uk/auto_toyota_sequoia_{auto_id}.html"
+            print("checking: ", car_url)
 
-        car = get_car(car_url, auto_id)
-        if car is None:
-            continue
-        print("detected new car or change prise: ", car)
+            car = get_car(car_url, auto_id)
+            if car is None:
+                continue
+            print("detected new car or change prise: ", car)
 
-        process_car(car)
+            process_car(car)
 
-        sleep_duration = random.uniform(2, 5)
-        time.sleep(sleep_duration)
+            sleep_duration = random.uniform(2, 5)
+            time.sleep(sleep_duration)
+    except requests.RequestException as e:
+        print("Error during advertisement page request:", e)
+    except Exception as e:
+        print("An error occurred during page scraping:", e)
 
 
 def run_scraper():
@@ -190,6 +209,8 @@ def run_scraper():
             scrap_pages()
             print("Scraper finished. Waiting 10 minutes...")
             time.sleep(600)
+    except KeyboardInterrupt:
+        print("Scraper interrupted by user.")
     finally:
         conn.close()
 
