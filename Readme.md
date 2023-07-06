@@ -17,7 +17,7 @@ git clone https://github.com/inrock1/scrap-ria.com
 
 - Navigate to the project directory:
 ```bash
-cd car-scraper
+cd scrap-ria
 ```
 
 - Install the required Python packages:
